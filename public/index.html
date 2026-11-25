@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QUREO SOLVER</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#090b10;color:#f4f5f7;font-family:Arial,sans-serif;min-height:100vh;padding:25px 15px}
+main{max-width:760px;margin:45px auto}
+header{text-align:center;margin-bottom:28px}
+h1{font-size:30px;letter-spacing:2px;margin:0 0 9px}
+.sub{color:#9299a8;font-size:14px}
+.card{background:#121620;border:1px solid #252c39;border-radius:15px;padding:22px;margin-bottom:17px}
+label{display:block;margin:15px 0 8px;color:#cbd0da;font-size:14px}
+input{width:100%;padding:14px;border-radius:9px;border:1px solid #30394a;background:#0b0e15;color:white;font-size:16px;outline:none}
+input:focus{border-color:#5587ff}
+button{width:100%;border:0;border-radius:9px;background:#3269ed;color:white;padding:15px;font-size:16px;font-weight:bold;cursor:pointer;margin-top:20px}
+button:disabled{opacity:.6;cursor:wait}
+.solve-btn{width:auto;padding:8px 14px;font-size:13px;margin-top:0;background:#28a745}
+.solve-btn:hover{background:#218838}
+#message{margin-top:17px;color:#aab2c1;text-align:center;font-size:14px;line-height:1.8}
+.good{color:#49d69b}.bad{color:#ff7373}.warn{color:#ffc66d}
+.hidden{display:none}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:17px 0}
+.stat{background:#0b0e15;border:1px solid #252c39;border-radius:10px;padding:15px 8px;text-align:center}
+.stat strong{display:block;font-size:25px;margin-bottom:6px}
+.stat span{font-size:12px;color:#aab2c1}
+.chapter{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid #252c39}
+.chapter:last-child{border:0}
+.chapter-name{font-size:14px;line-height:1.6}
+.status-area{display:flex;align-items:center;gap:10px}
+.status{font-size:12px;white-space:nowrap}
+.course-title{font-size:19px;margin:0 0 10px}
+.error{background:#291c16;border:1px solid #69402b;color:#ffc18e;padding:12px;border-radius:9px;margin-top:12px;font-size:13px}
+footer{text-align:center;color:#657083;font-size:12px;margin-top:25px}
+@media(max-width:450px){main{margin:20px auto}.card{padding:16px}.stats{gap:6px}.stat strong{font-size:21px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>QUREO SOLVER</h1>
+<div class="sub">تسجيل الدخول ومتابعة تقدمك في QUREO</div>
+</header>
+
+<section class="card">
+<form id="loginForm">
+<label for="studentId">كود الطالب</label>
+<input id="studentId" autocomplete="username" required placeholder="أدخل كود الطالب">
+<label for="password">كلمة المرور</label>
+<input id="password" type="password" autocomplete="current-password" required placeholder="أدخل كلمة المرور">
+<button id="startBtn" type="submit">اتصال وجلب الفصول</button>
+</form>
+<div id="message" aria-live="polite">أدخل بيانات حسابك لبدء الاتصال بالمنصة.</div>
+</section>
+
+<section id="account" class="hidden">
+<div class="card">
+<h2 class="course-title">بيانات الحساب</h2>
+<div id="accountInfo" class="sub"></div>
+</div>
+<div id="courses"></div>
+</section>
+
+<footer>QUREO SOLVER</footer>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let globalCredentials = {};
+
+const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({
+'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+}[c]));
+
+function renderCourses(user) {
+  const root = $('courses');
+  const courses = user.courses || [];
+  const errors = user.course_errors || [];
+
+  if (!courses.length && !errors.length) {
+    root.innerHTML = '<div class="card">لم تصل بيانات الكورسات من المنصة.</div>';
+    return;
+  }
+
+  root.innerHTML = courses.map(course => {
+    const chapters = course.chapters || [];
+    const rows = chapters.map(ch => {
+      const completed = ch.status === 'completed';
+      const missing = ch.status === 'missing';
+      const statusText = completed ? 'مكتمل' : missing ? 'بيانات غير متاحة' : 'غير مكتمل';
+      const cls = completed ? 'good' : missing ? 'warn' : 'bad';
+      
+      let actionBtn = '';
+      if (!completed && !missing) {
+        actionBtn = `<button class="solve-btn" onclick="solveChapter('${ch.id}', this)">حل الفصل</button>`;
+      }
+
+      return `<div class="chapter">
+        <div class="chapter-name">
+          الفصل ${Number(ch.seq)} — ${escapeHTML(ch.name || 'بدون اسم')}
+          <div class="sub">عدد الأسئلة: ${Number(ch.question_count || 0)}</div>
+        </div>
+        <div class="status-area">
+          <span class="status ${cls}">${statusText}</span>
+          ${actionBtn}
+        </div>
+      </div>`;
+    }).join('');
+
+    return `<section class="card">
+      <h2 class="course-title">${escapeHTML(course.name || course.content_id)}</h2>
+      <div class="stats">
+        <div class="stat"><strong>${Number(course.total_chapters || 0)}</strong><span>إجمالي الفصول</span></div>
+        <div class="stat"><strong class="good">${Number(course.completed_chapters || 0)}</strong><span>مكتملة</span></div>
+        <div class="stat"><strong>${Number(course.incomplete_chapters || 0)}</strong><span>غير مكتملة</span></div>
+      </div>
+      ${rows || '<div class="sub">لا توجد تفاصيل للفصول.</div>'}
+    </section>`;
+  }).join('');
+
+  errors.forEach(error => {
+    root.innerHTML += `<div class="error">تعذر تحميل ${escapeHTML(error.content_id)}: ${escapeHTML(error.error)}</div>`;
+  });
+}
+
+async function solveChapter(chapterId, btnElement) {
+  if (!confirm('هل أنت متأكد من رغبتك في بدء حل هذا الفصل تلقائياً؟')) return;
+
+  const originalText = btnElement.textContent;
+  btnElement.disabled = true;
+  btnElement.textContent = 'جاري الحل...';
+
+  try {
+    const response = await fetch('/api/qureo/solve', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        chapter_id: chapterId,
+        student_id: globalCredentials.studentId,
+        password: globalCredentials.password
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'فشل تنفيذ عملية الحل.');
+    }
+
+    alert('تم حل الفصل بنجاح!');
+    btnElement.textContent = 'مكتمل';
+    btnElement.style.background = '#49d69b';
+  } catch (error) {
+    alert('خطأ: ' + error.message);
+    btnElement.disabled = false;
+    btnElement.textContent = originalText;
+  }
+}
+
+$('loginForm').addEventListener('submit', async event => {
+  event.preventDefault();
+
+  const button = $('startBtn');
+  const message = $('message');
+  const studentId = $('studentId').value.trim();
+  const passwordInput = $('password');
+  const password = passwordInput.value;
+
+  if (!studentId || !password) return;
+
+  globalCredentials = { studentId, password };
+
+  button.disabled = true;
+  button.textContent = 'جاري الاتصال...';
+  message.textContent = 'جاري تسجيل الدخول وجلب بيانات الحساب والفصول...';
+  $('account').classList.add('hidden');
+  $('courses').innerHTML = '';
+
+  try {
+    const response = await fetch('/api/qureo/connect', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({student_id: studentId, password})
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.authenticated || !data.user) {
+      throw new Error(data.error || 'تعذر تسجيل الدخول.');
+    }
+
+    const user = data.user;
+    $('accountInfo').textContent =
+      'تم تسجيل الدخول بنجاح — الكورسات المتاحة: ' +
+      (user.available_courses || []).length;
+
+    renderCourses(user);
+    $('account').classList.remove('hidden');
+    message.innerHTML = '<span class="good">تم تسجيل الدخول وجلب البيانات بنجاح. اختر الفصل غير المكتمل واضغط "حل الفصل".</span>';
+  } catch (error) {
+    message.innerHTML = '<span class="bad">' + escapeHTML(error.message) + '</span>';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'اتصال وجلب الفصول';
+  }
+});
+</script>
+</body>
+</html>
